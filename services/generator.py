@@ -17,19 +17,41 @@ def gerar_arquivos(path_modelo, dados, pasta_saida, callback_progresso=None):
     except Exception as e:
         raise Exception(f"Erro ao abrir o modelo Word: {str(e)}")
 
-    reportar(30, "Processando dados...")
+    reportar(30, "Processando e padronizando textos...")
     
-    # Não pode converter LISTAS para STRING, senão o Word soletra letra por letra
+    # --- LÓGICA DE PADRONIZAÇÃO (MAIÚSCULAS/MINÚSCULAS) ---
     dados_limpos = {}
     for chave, valor in dados.items():
         if valor is None:
             dados_limpos[chave] = ""
         elif isinstance(valor, list):
-            # Se for lista (Orçamento ou Estrutural), mantém como lista
+            # Mantém as listas (Orçamento e Estrutural) intactas
             dados_limpos[chave] = valor
         else:
-            # Se for texto ou número, converte para string segura
-            dados_limpos[chave] = str(valor)
+            texto = str(valor).strip()
+            chave_upper = chave.upper()
+            
+            # Regras de formatação por tipo de campo
+            if "EMAIL" in chave_upper:
+                dados_limpos[chave] = texto.lower()
+                
+            elif any(x in chave_upper for x in ["UF", "ESTADO", "CEP", "CNPJ", "CPF", "IE"]):
+                dados_limpos[chave] = texto.upper()
+                
+            elif any(x in chave_upper for x in ["DATA", "VALOR", "FRETE", "X_"]):
+                # Mantém originais: Datas, Valores em R$, Frete e check de serviços
+                dados_limpos[chave] = texto
+                
+            else:
+                # Aplica o padrão: Primeira Maiúscula, o resto minúscula
+                texto_formatado = texto.title()
+                
+                # Ajuste fino: transforma "De", "Da", "Do" em minúsculas
+                preposicoes = [" De ", " Da ", " Do ", " Das ", " Dos ", " E "]
+                for prep in preposicoes:
+                    texto_formatado = texto_formatado.replace(prep, prep.lower())
+                    
+                dados_limpos[chave] = texto_formatado
     
     # Renderiza o documento
     try:
@@ -44,6 +66,9 @@ def gerar_arquivos(path_modelo, dados, pasta_saida, callback_progresso=None):
                    dados.get("NOME_CLIENTE") or \
                    "Cliente"
                    
+    # Padroniza o nome do cliente no nome do arquivo
+    nome_cliente = nome_cliente.title() 
+    
     num_projeto = dados.get("NUMERO_PROJETO") or "000"
     data_hoje = datetime.now().strftime("%d-%m-%Y")
     
