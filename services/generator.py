@@ -4,7 +4,7 @@ import os
 import sys
 import re
 import pythoncom
-import win32com.client  # <--- INTEGRAÇÃO DIRETA COM O WORD
+import win32com.client
 
 def gerar_arquivos(path_modelo, dados, pasta_saida, callback_progresso=None):
     
@@ -32,10 +32,29 @@ def gerar_arquivos(path_modelo, dados, pasta_saida, callback_progresso=None):
             
             if "EMAIL" in chave_upper:
                 dados_limpos[chave] = texto.lower()
-            elif any(x in chave_upper for x in ["UF", "ESTADO", "CEP", "CNPJ", "CPF", "IE"]):
+                
+            elif "CNPJ" in chave_upper:
+                # Extrai apenas os números do que o usuário digitou
+                apenas_numeros = re.sub(r'\D', '', texto)
+                
+                if len(apenas_numeros) == 14:
+                    # Formata no padrão XX.XXX.XXX/XXXX-XX
+                    cnpj_formatado = f"{apenas_numeros[:2]}.{apenas_numeros[2:5]}.{apenas_numeros[5:8]}/{apenas_numeros[8:12]}-{apenas_numeros[12:]}"
+                    dados_limpos[chave] = cnpj_formatado
+                elif len(apenas_numeros) == 11:
+                    # Se por acaso for um CPF (11 dígitos): XXX.XXX.XXX-XX
+                    cpf_formatado = f"{apenas_numeros[:3]}.{apenas_numeros[3:6]}.{apenas_numeros[6:9]}-{apenas_numeros[9:]}"
+                    dados_limpos[chave] = cpf_formatado
+                else:
+                    # Se estiver incompleto, apenas deixa em maiúsculo
+                    dados_limpos[chave] = texto.upper()
+                    
+            elif any(x in chave_upper for x in ["UF", "ESTADO", "CEP", "CPF", "IE"]):
                 dados_limpos[chave] = texto.upper()
+                
             elif any(x in chave_upper for x in ["DATA", "VALOR", "FRETE", "X_"]):
                 dados_limpos[chave] = texto
+                
             else:
                 texto_formatado = texto.title()
                 preposicoes = [" De ", " Da ", " Do ", " Das ", " Dos ", " E "]
@@ -71,27 +90,21 @@ def gerar_arquivos(path_modelo, dados, pasta_saida, callback_progresso=None):
     reportar(70, "Convertendo para PDF...")
     try:
         if sys.platform == "win32":
-            # Inicializa a Thread do Windows
             pythoncom.CoInitialize()
-            
-            # Chama o Microsoft Word invisível
             word = win32com.client.DispatchEx("Word.Application")
             word.Visible = False
             
             try:
-                # Abre o documento salvo e exporta como PDF (FileFormat=17)
                 documento = word.Documents.Open(path_word)
                 documento.SaveAs(path_pdf, FileFormat=17)
                 documento.Close()
             finally:
-                # Garante que o Word vai fechar mesmo se der erro
                 word.Quit()
                 
             pythoncom.CoUninitialize()
         else:
             pass 
     except Exception as e:
-        # Se falhar agora, pelo menos mostrará o erro exato na tela
         reportar(70, f"Aviso PDF: {str(e)}")
         print(f"Erro PDF: {e}")
     
