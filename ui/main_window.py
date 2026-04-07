@@ -22,7 +22,6 @@ class GeradorPropostasApp:
         
         config = self._carregar_config()
 
-        # --- CORREÇÃO 1: path_modelo é string fixa, não precisa de .get() depois ---
         self.path_modelo = resource_path("proposta_modelo.docx")
         print(f"Usando modelo interno: {self.path_modelo}") 
 
@@ -47,7 +46,6 @@ class GeradorPropostasApp:
 
         ctk.CTkLabel(f_arquivos, text="Arquivos de Entrada", font=("Roboto", 14, "bold")).grid(row=0, column=0, sticky="w", padx=15, pady=10)
         
-        # Labels indicando modelo interno
         ctk.CTkLabel(f_arquivos, text="Modelo Word:").grid(row=1, column=0, sticky="w", padx=15, pady=5)
         ctk.CTkLabel(f_arquivos, text="Padrão Interno (Automático)", text_color="orange").grid(row=1, column=1, sticky="w", padx=5, pady=5)
 
@@ -136,28 +134,50 @@ class GeradorPropostasApp:
                 dados_fat = parser.processar_dados(placeholders, txt_fat, sufixo_filtro="_CONTRATANTE")
                 dados_auto.update(dados_fat)
 
-            # --- ETAPAS VISUAIS (COM CANCELAMENTO) ---
+            passo_atual = 1
+            dados_acumulados = dados_auto.copy()
+
+            while passo_atual <= 3:
+                if passo_atual == 1:
+                    self.log("3. Revisão (Passo 1/3)...")
+                    resultado = janela_verificacao_unificada(self.root, placeholders, dados_acumulados)
+                    if resultado is None:
+                        self.log(">> PROCESSO CANCELADO PELO USUÁRIO <<")
+                        self.btn_processar.configure(state="normal")
+                        return
+                    
+                    dados_acumulados.update(resultado)
+                    passo_atual = 2
+
+                elif passo_atual == 2:
+                    self.log("4. Estrutural (Passo 2/3)...")
+                    resultado = janela_projeto_estrutural(self.root, dados_acumulados)
+                    if resultado is None:
+                        self.log(">> PROCESSO CANCELADO PELO USUÁRIO <<")
+                        self.btn_processar.configure(state="normal")
+                        return
+                    if resultado == "VOLTAR":
+                        passo_atual = 1
+                        continue
+                    
+                    dados_acumulados = resultado
+                    passo_atual = 3
+
+                elif passo_atual == 3:
+                    self.log("5. Orçamento (Passo 3/3)...")
+                    resultado = janela_itens_orcamento(self.root, dados_acumulados)
+                    if resultado is None:
+                        self.log(">> PROCESSO CANCELADO PELO USUÁRIO <<")
+                        self.btn_processar.configure(state="normal")
+                        return
+                    if resultado == "VOLTAR":
+                        passo_atual = 2
+                        continue
+                    
+                    dados_acumulados = resultado
+                    break 
             
-            self.log("3. Revisão (Passo 1/3)...")
-            dados_revisados = janela_verificacao_unificada(self.root, placeholders, dados_auto)
-            if dados_revisados is None:
-                self.log(">> PROCESSO CANCELADO PELO USUÁRIO NA REVISÃO <<")
-                self.btn_processar.configure(state="normal")
-                return
-
-            self.log("4. Estrutural (Passo 2/3)...")
-            dados_com_estrutural = janela_projeto_estrutural(self.root, dados_revisados)
-            if dados_com_estrutural is None:
-                self.log(">> PROCESSO CANCELADO PELO USUÁRIO NO ESTRUTURAL <<")
-                self.btn_processar.configure(state="normal")
-                return
-
-            self.log("5. Orçamento (Passo 3/3)...")
-            dados_finais = janela_itens_orcamento(self.root, dados_com_estrutural)
-            if dados_finais is None:
-                self.log(">> PROCESSO CANCELADO PELO USUÁRIO NO ORÇAMENTO <<")
-                self.btn_processar.configure(state="normal")
-                return
+            dados_finais = dados_acumulados
 
             agora = datetime.now()
             meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']

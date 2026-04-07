@@ -3,8 +3,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
 import threading
+import re
 
-# --- CONFIGURAÇÃO DE ESTILO PARA A TABELA (Treeview) ---
 def aplicar_estilo_tabela():
     style = ttk.Style()
     style.theme_use("default")
@@ -13,41 +13,27 @@ def aplicar_estilo_tabela():
     text_color = "white"
     selected_color = "#1f538d"
     
-    style.configure("Treeview",
-                    background=bg_color,
-                    foreground=text_color,
-                    fieldbackground=bg_color,
-                    borderwidth=0,
-                    rowheight=25)
-    
-    style.configure("Treeview.Heading",
-                    background="#1a1a1a",
-                    foreground="white",
-                    relief="flat")
-    
+    style.configure("Treeview", background=bg_color, foreground=text_color, fieldbackground=bg_color, borderwidth=0, rowheight=25)
+    style.configure("Treeview.Heading", background="#1a1a1a", foreground="white", relief="flat")
     style.map("Treeview", background=[("selected", selected_color)])
 
-# --- JANELA 1: REVISÃO DE DADOS ---
 def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
     win = ctk.CTkToplevel(parent)
-    win.title("Conferência Geral dos Dados")
+    win.title("Passo 1: Conferência Geral")
     win.geometry("950x750")
-    
     win.transient(parent)
     win.grab_set()
     win.lift()
     win.focus_force()
     
-    # Variável de controle de cancelamento
     status = {"confirmado": False}
-
     resultado_final = {}
     widgets_texto = {}
     widgets_servicos = {}
     
-    var_frete = ctk.StringVar(value="CIF - Por conta do destinatário")
+    frete_atual = dados_extraidos.get("TIPO_FRETE", "CIF - Por conta do destinatário")
+    var_frete = ctk.StringVar(value=frete_atual)
 
-    # Cabeçalho
     ctk.CTkLabel(win, text="Revise os dados abaixo", font=("Roboto", 20, "bold")).pack(pady=(20, 5), padx=20, anchor="w")
     ctk.CTkLabel(win, text="Digite o CNPJ e clique na lupa para preencher automático.", text_color="gray").pack(pady=(0, 10), padx=20, anchor="w")
 
@@ -58,17 +44,14 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
         ctk.CTkLabel(scroll_frame, text=texto, font=("Roboto", 16, "bold"), text_color=("#3B8ED0", "#FF9800")).pack(anchor="w", pady=(20, 10))
         ctk.CTkFrame(scroll_frame, height=2, fg_color="gray30").pack(fill="x", pady=(0, 10))
 
-    # 1. OPÇÕES
     add_section_title("1. OPÇÕES DA PROPOSTA")
     f_opcoes = ctk.CTkFrame(scroll_frame, fg_color="transparent")
     f_opcoes.pack(fill="x", pady=5)
     
     ctk.CTkLabel(f_opcoes, text="Tipo de Frete:").pack(side="left", padx=(0, 10))
     opcoes_frete = ["CIF - Por conta do destinatário", "FOB - Por conta do Cliente"]
-    c_frete = ctk.CTkComboBox(f_opcoes, variable=var_frete, values=opcoes_frete, width=300)
-    c_frete.pack(side="left")
+    ctk.CTkComboBox(f_opcoes, variable=var_frete, values=opcoes_frete, width=300).pack(side="left")
 
-    # 2. SERVIÇOS
     lista_servicos = sorted([p for p in todos_placeholders if p.startswith("X_")])
     if lista_servicos:
         add_section_title("2. SELEÇÃO DE SERVIÇOS")
@@ -83,11 +66,14 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
             nome_bonito = servico.replace("X_", "").replace("_", " ").title()
             chk = ctk.CTkCheckBox(f_servicos, text=nome_bonito)
             chk.grid(row=row, column=col, sticky="w", padx=10, pady=10)
+            
+            if dados_extraidos.get(servico) == "X":
+                chk.select()
+                
             widgets_servicos[servico] = chk
             col += 1
             if col > 2: col, row = 0, row + 1
 
-    # 3. CAMPOS DE TEXTO
     campos_ignorados = ["TIPO_FRETE", "VALOR_TOTAL_PROPOSTA", "ITENS_ORCAMENTO", "ITENS_ESTRUTURAL", "item", "DATA_HOJE"]
     todos_campos_texto = [p for p in todos_placeholders if not p.startswith("X_") and p not in campos_ignorados and not p.startswith("item.")]
     
@@ -95,9 +81,8 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
     grupo_contratante = [p for p in todos_campos_texto if p.endswith("_CONTRATANTE")]
     grupo_outros = [p for p in todos_campos_texto if p not in grupo_solicitante and p not in grupo_contratante]
 
-    # --- BUSCA API ---
     def buscar_cnpj_api(entry_cnpj, contexto):
-        cnpj_limpo = entry_cnpj.get().replace(".", "").replace("/", "").replace("-", "").strip()
+        cnpj_limpo = "".join(filter(str.isdigit, entry_cnpj.get()))
         if len(cnpj_limpo) != 14:
             messagebox.showwarning("Aviso", "O CNPJ deve ter exatamente 14 números.")
             return
@@ -107,7 +92,6 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
                 url = f"https://www.receitaws.com.br/v1/cnpj/{cnpj_limpo}"
                 headers = {'User-Agent': 'Mozilla/5.0'}
                 response = requests.get(url, headers=headers, timeout=10)
-                
                 if response.status_code == 200:
                     dados = response.json()
                     if dados.get('status') == 'ERROR':
@@ -116,13 +100,9 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
 
                     mapeamento = {
                         "nome": ["NOME_EMPRESA", "RAZAO_SOCIAL"], 
-                        "fantasia": ["NOME_FANTASIA"],
-                        "cep": ["CEP"],
-                        "municipio": ["CIDADE", "MUNICIPIO"],
-                        "uf": ["UF", "ESTADO"],
-                        "email": ["EMAIL"],
-                        "telefone": ["TELEFONE", "CELULAR", "WHATSAPP"],
-                        "bairro": ["BAIRRO"]
+                        "fantasia": ["NOME_FANTASIA"], "cep": ["CEP"],
+                        "municipio": ["CIDADE", "MUNICIPIO"], "uf": ["UF", "ESTADO"],
+                        "email": ["EMAIL"], "telefone": ["TELEFONE", "CELULAR", "WHATSAPP"], "bairro": ["BAIRRO"]
                     }
                     
                     logradouro = dados.get('logradouro', '')
@@ -132,17 +112,15 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
                     if comp: endereco_full += f" - {comp}"
 
                     def atualizar_gui():
-                        count_preenchidos = 0
+                        count = 0
                         for campo_word, entry_widget in widgets_texto.items():
                             campo_upper = campo_word.upper()
                             if contexto == "FATURAMENTO" and "CONTRATANTE" not in campo_upper: continue
-                            
                             if "ENDERECO" in campo_upper and "OBRA" not in campo_upper and "ENTREGA" not in campo_upper:
                                 entry_widget.delete(0, "end")
                                 entry_widget.insert(0, endereco_full)
-                                count_preenchidos += 1
+                                count += 1
                                 continue
-
                             for chave_api, lista_possiveis in mapeamento.items():
                                 for possivel in lista_possiveis:
                                     if possivel in campo_upper:
@@ -151,18 +129,29 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
                                         if valor:
                                             entry_widget.delete(0, "end")
                                             entry_widget.insert(0, str(valor))
-                                            count_preenchidos += 1
-                        
-                        nome_exibicao = dados.get('fantasia') or dados.get('nome')
-                        messagebox.showinfo("Sucesso", f"Empresa encontrada!\n{nome_exibicao}\n({count_preenchidos} campos atualizados)")
-
+                                            count += 1
+                        messagebox.showinfo("Sucesso", f"Empresa atualizada! ({count} campos)")
                     win.after(0, atualizar_gui)
-                else:
-                    win.after(0, lambda: messagebox.showerror("Erro", f"Erro API: {response.status_code}"))
-            except Exception as e:
-                win.after(0, lambda: messagebox.showerror("Erro", str(e)))
-
+                else: win.after(0, lambda: messagebox.showerror("Erro", f"Erro API: {response.status_code}"))
+            except Exception as e: win.after(0, lambda: messagebox.showerror("Erro", str(e)))
         threading.Thread(target=task, daemon=True).start()
+
+    def trava_numeros(event, widget):
+        if event.keysym in ['Left', 'Right', 'BackSpace', 'Delete']: return
+        texto = widget.get()
+        limpo = "".join([c for c in texto if c.isdigit() or c in ".-/() "])
+        if texto != limpo:
+            widget.delete(0, "end")
+            widget.insert(0, limpo)
+
+    def trava_letras(event, widget, limite=None):
+        if event.keysym in ['Left', 'Right', 'BackSpace', 'Delete']: return
+        texto = widget.get()
+        limpo = "".join([c for c in texto if c.isalpha() or c.isspace()])
+        if limite: limpo = limpo[:limite]
+        if texto != limpo:
+            widget.delete(0, "end")
+            widget.insert(0, limpo)
 
     def desenhar_campos(lista, titulo):
         if not lista: return
@@ -173,23 +162,13 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
         f_campos.grid_columnconfigure(3, weight=1) 
 
         mapa_nomes = {
-            "NOME_EMPRESA": "Nome da Empresa / Razão Social",
-            "NOME_CLIENTE": "Nome do Cliente",
-            "CNPJ_CPF": "CNPJ ou CPF",
-            "IE": "Inscrição Estadual (I.E.)",
-            "CEP": "CEP",
-            "ENDERECO": "Endereço Completo",
-            "CELULAR": "Celular / WhatsApp",
-            "EMAIL": "E-mail",
-            "CREA": "Registro CREA / CAU",
-            "ART": "A.R.T.",
-            "RESPONSAVEL_TECNICO": "Responsável Técnico",
-            "NUMERO_PROJETO": "Número do Projeto",
-            "TIPO_OBRA": "Tipo de Obra",
-            "DESCRICAO_DA_OBRA": "Descrição Detalhada",
-            "ENDERECO_DA_OBRA": "Local da Obra",
-            "ARQUIVOS_RECEBIDOS": "Arquivos Recebidos",
-            "DATA_HOJE": "Data de Emissão"
+            "NOME_EMPRESA": "Nome da Empresa / Razão Social", "NOME_CLIENTE": "Nome do Cliente",
+            "CNPJ_CPF": "CNPJ ou CPF", "IE": "Inscrição Estadual (I.E.)", "CEP": "CEP",
+            "ENDERECO": "Endereço Completo", "CELULAR": "Celular / WhatsApp", "EMAIL": "E-mail",
+            "CREA": "Registro CREA / CAU", "ART": "A.R.T.", "RESPONSAVEL_TECNICO": "Responsável Técnico",
+            "NUMERO_PROJETO": "Número do Projeto", "TIPO_OBRA": "Tipo de Obra",
+            "DESCRICAO_DA_OBRA": "Descrição Detalhada", "ENDERECO_DA_OBRA": "Local da Obra",
+            "ARQUIVOS_RECEBIDOS": "Arquivos Recebidos", "DATA_HOJE": "Data de Emissão"
         }
 
         for i, campo in enumerate(lista):
@@ -207,6 +186,7 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
                 ent = ctk.CTkEntry(f_cnpj)
                 if valor_auto: ent.insert(0, valor_auto)
                 ent.pack(side="left", fill="x", expand=True)
+                ent.bind("<KeyRelease>", lambda e, w=ent: trava_numeros(e, w))
                 tipo_busca = "FATURAMENTO" if "CONTRATANTE" in campo.upper() else "SOLICITANTE"
                 ctk.CTkButton(f_cnpj, text="🔍", width=40, command=lambda e=ent, t=tipo_busca: buscar_cnpj_api(e, t)).pack(side="right", padx=(5, 0))
                 widgets_texto[campo] = ent
@@ -215,6 +195,12 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
                 if valor_auto: ent.insert(0, valor_auto)
                 ent.grid(row=row, column=col_start+1, sticky="ew", padx=(0, 20), pady=5)
                 widgets_texto[campo] = ent
+                c_upper = campo.upper()
+                if any(x in c_upper for x in ["CEP", "CELULAR", "TELEFONE", "WHATSAPP", "CPF"]):
+                    ent.bind("<KeyRelease>", lambda e, w=ent: trava_numeros(e, w))
+                elif "UF" in c_upper: ent.bind("<KeyRelease>", lambda e, w=ent: trava_letras(e, w, limite=2))
+                elif any(x in c_upper for x in ["CIDADE", "MUNICIPIO", "ESTADO"]):
+                    ent.bind("<KeyRelease>", lambda e, w=ent: trava_letras(e, w))
 
     desenhar_campos(grupo_outros, "3. DADOS GERAIS DO PROJETO")
     desenhar_campos(grupo_solicitante, "4. DADOS DO SOLICITANTE")
@@ -227,27 +213,25 @@ def janela_verificacao_unificada(parent, todos_placeholders, dados_extraidos):
         for k, entry in widgets_texto.items(): resultado_final[k] = entry.get()
         win.destroy()
 
-    ctk.CTkButton(win, text="CONFIRMAR E CONTINUAR", command=confirmar, height=50, fg_color="green", hover_color="darkgreen").pack(fill="x", padx=20, pady=20)
+    ctk.CTkButton(win, text="AVANÇAR", command=confirmar, height=50, fg_color="green", hover_color="darkgreen").pack(fill="x", padx=20, pady=20)
     
     parent.wait_window(win)
-    
-    if not status["confirmado"]:
-        return None  # Retorna None se fechou no X
+    if not status["confirmado"]: return None
     return resultado_final
 
-# --- JANELA 2: ESCOPO ESTRUTURAL ---
+
 def janela_projeto_estrutural(parent, dados_anteriores):
     win = ctk.CTkToplevel(parent)
     win.title("Passo 2: Escopo Estrutural")
     win.geometry("900x700")
-    
     win.transient(parent)
     win.grab_set()
     win.lift()
     win.focus_force()
 
-    status = {"confirmado": False}
-    lista_itens_estrutural = []
+    status = {"acao": None}
+    
+    lista_itens_estrutural = dados_anteriores.get("ITENS_ESTRUTURAL", []).copy()
     aplicar_estilo_tabela()
 
     ctk.CTkLabel(win, text="Definição do Escopo Estrutural", font=("Roboto", 20, "bold")).pack(pady=(20, 5))
@@ -264,8 +248,7 @@ def janela_projeto_estrutural(parent, dados_anteriores):
     f_lista = ctk.CTkFrame(win, fg_color="transparent")
     f_lista.pack(fill="both", expand=True, padx=20, pady=5)
 
-    columns = ("desc",)
-    tree = ttk.Treeview(f_lista, columns=columns, show="headings", selectmode="browse")
+    tree = ttk.Treeview(f_lista, columns=("desc",), show="headings", selectmode="browse")
     tree.heading("desc", text="Itens Adicionados")
     tree.column("desc", anchor="w")
     
@@ -273,6 +256,11 @@ def janela_projeto_estrutural(parent, dados_anteriores):
     tree.configure(yscrollcommand=scrollbar.set)
     tree.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
+
+    for item in lista_itens_estrutural:
+        primeira_linha = item.split("\n")[0]
+        if len(item.split("\n")) > 1: primeira_linha += " (...)"
+        tree.insert("", "end", values=(primeira_linha,), tags=(item,))
 
     def adicionar_item():
         desc = txt_desc.get("1.0", "end-1c").strip()
@@ -292,40 +280,55 @@ def janela_projeto_estrutural(parent, dados_anteriores):
             if idx < len(lista_itens_estrutural): lista_itens_estrutural.pop(idx)
             tree.delete(item_id)
 
+    def voltar():
+        status["acao"] = "VOLTAR"
+        win.destroy()
+
     def finalizar():
-        status["confirmado"] = True
+        status["acao"] = "AVANCAR"
         dados_anteriores["ITENS_ESTRUTURAL"] = lista_itens_estrutural
         win.destroy()
 
     ctk.CTkButton(f_input, text="Adicionar Item", command=adicionar_item).pack(anchor="e", padx=10, pady=10)
+    
     f_footer = ctk.CTkFrame(win, height=50, fg_color="transparent")
     f_footer.pack(fill="x", padx=20, pady=20)
+    
+    ctk.CTkButton(f_footer, text="VOLTAR", command=voltar, fg_color="gray", hover_color="darkgray", width=100).pack(side="left", padx=(0, 10))
     ctk.CTkButton(f_footer, text="Remover Selecionado", command=remover_item, fg_color="firebrick", hover_color="darkred").pack(side="left")
-    ctk.CTkButton(f_footer, text="CONCLUIR", command=finalizar, fg_color="green", hover_color="darkgreen").pack(side="right")
+    ctk.CTkButton(f_footer, text="AVANÇAR", command=finalizar, fg_color="green", hover_color="darkgreen").pack(side="right")
 
     parent.wait_window(win)
     
-    if not status["confirmado"]:
-        return None
-    return dados_anteriores
+    if status["acao"] == "VOLTAR": return "VOLTAR"
+    if status["acao"] == "AVANCAR": return dados_anteriores
+    return None 
 
-# --- JANELA 3: ORÇAMENTO ---
+
 def janela_itens_orcamento(parent, dados_anteriores):
     win = ctk.CTkToplevel(parent)
     win.title("Passo 3: Orçamento")
     win.geometry("900x700")
-    
     win.transient(parent)
     win.grab_set()
     win.lift()
     win.focus_force()
 
-    status = {"confirmado": False}
-    lista_itens = []
-    total_geral_float = 0.0
+    status = {"acao": None}
     aplicar_estilo_tabela()
 
-    ctk.CTkLabel(win, text="Composição do Orçamento", font=("Roboto", 20, "bold")).pack(pady=(20, 10))
+    lista_itens = dados_anteriores.get("ITENS_ORCAMENTO", []).copy()
+    total_geral_float = 0.0
+
+    def converter_brl_para_float(texto):
+        limpo = texto.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+        try: return float(limpo)
+        except: return 0.0
+
+    def formatar_moeda_exibicao(valor_float):
+        return f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    ctk.CTkLabel(win, text="Condições de Pagamento", font=("Roboto", 20, "bold")).pack(pady=(20, 10))
     
     f_input = ctk.CTkFrame(win)
     f_input.pack(fill="x", padx=20, pady=10)
@@ -355,8 +358,7 @@ def janela_itens_orcamento(parent, dados_anteriores):
     f_lista = ctk.CTkFrame(win, fg_color="transparent")
     f_lista.pack(fill="both", expand=True, padx=20, pady=5)
 
-    columns = ("desc", "valor")
-    tree = ttk.Treeview(f_lista, columns=columns, show="headings")
+    tree = ttk.Treeview(f_lista, columns=("desc", "valor"), show="headings")
     tree.heading("desc", text="Descrição")
     tree.heading("valor", text="Valor")
     tree.column("desc", width=500)
@@ -367,16 +369,13 @@ def janela_itens_orcamento(parent, dados_anteriores):
     tree.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
 
-    lbl_total = ctk.CTkLabel(win, text="TOTAL GERAL: R$ 0,00", font=("Roboto", 24, "bold"), text_color="green")
+    for item in lista_itens:
+        val_float = converter_brl_para_float(item["valor"])
+        total_geral_float += val_float
+        tree.insert("", "end", values=(item["descricao"], item["valor"]))
+
+    lbl_total = ctk.CTkLabel(win, text=f"TOTAL GERAL: {formatar_moeda_exibicao(total_geral_float)}", font=("Roboto", 24, "bold"), text_color="green")
     lbl_total.pack(pady=10)
-
-    def formatar_moeda_exibicao(valor_float):
-        return f"R$ {valor_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-    def converter_brl_para_float(texto):
-        limpo = texto.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
-        try: return float(limpo)
-        except: return 0.0
 
     def adicionar_item():
         nonlocal total_geral_float
@@ -412,20 +411,27 @@ def janela_itens_orcamento(parent, dados_anteriores):
             total_geral_float += val_float
         lbl_total.configure(text=f"TOTAL GERAL: {formatar_moeda_exibicao(total_geral_float)}")
 
+    def voltar():
+        status["acao"] = "VOLTAR"
+        win.destroy()
+
     def finalizar():
-        status["confirmado"] = True
+        status["acao"] = "AVANCAR"
         dados_anteriores["ITENS_ORCAMENTO"] = lista_itens
         dados_anteriores["VALOR_TOTAL_PROPOSTA"] = formatar_moeda_exibicao(total_geral_float)
         win.destroy()
 
     ctk.CTkButton(f_input, text="Adicionar (+)", command=adicionar_item, width=120).grid(row=1, column=2, padx=10, pady=(0, 10))
+    
     f_footer = ctk.CTkFrame(win, fg_color="transparent")
     f_footer.pack(fill="x", padx=20, pady=20)
+    
+    ctk.CTkButton(f_footer, text="VOLTAR", command=voltar, fg_color="gray", hover_color="darkgray", width=100).pack(side="left", padx=(0, 10))
     ctk.CTkButton(f_footer, text="Remover Item", command=remover_item, fg_color="firebrick", hover_color="darkred").pack(side="left")
     ctk.CTkButton(f_footer, text="GERAR PROPOSTA", command=finalizar, fg_color="green", hover_color="darkgreen", height=40).pack(side="right", fill="x", expand=True, padx=(20, 0))
 
     parent.wait_window(win)
     
-    if not status["confirmado"]:
-        return None
-    return dados_anteriores
+    if status["acao"] == "VOLTAR": return "VOLTAR"
+    if status["acao"] == "AVANCAR": return dados_anteriores
+    return None 
