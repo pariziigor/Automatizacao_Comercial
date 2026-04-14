@@ -49,12 +49,6 @@ class GeradorPropostasApp:
         ctk.CTkLabel(f_arquivos, text="Modelo Word:").grid(row=1, column=0, sticky="w", padx=15, pady=5)
         ctk.CTkLabel(f_arquivos, text="Padrão Interno (Automático)", text_color="orange").grid(row=1, column=1, sticky="w", padx=5, pady=5)
 
-        self._criar_seletor(f_arquivos, "Ficha Solicitante:", self.path_solicitante, 2)
-        ctk.CTkLabel(f_arquivos, text="(Opcional)", text_color="gray").grid(row=2, column=3, sticky="w", padx=(0, 10))
-
-        self._criar_seletor(f_arquivos, "Ficha Faturamento:", self.path_faturamento, 3)
-        ctk.CTkLabel(f_arquivos, text="(Opcional)", text_color="gray").grid(row=3, column=3, sticky="w", padx=(0, 10))
-
         div = ctk.CTkFrame(f_arquivos, height=2, fg_color="gray30")
         div.grid(row=4, column=0, columnspan=4, sticky="ew", pady=15, padx=10)
         
